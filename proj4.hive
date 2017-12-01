@@ -1,0 +1,142 @@
+DROP TABLE IF EXISTS batting;
+CREATE EXTERNAL TABLE IF NOT EXISTS batting(id STRING, year INT, team STRING, league
+STRING, games INT, ab INT, runs INT, hits INT, doubles INT, triples INT, homeruns
+INT, rbi INT, sb INT, cs INT, walks INT, strikeouts INT, ibb INT, hbp INT, sh INT, sf
+INT, gidp INT) ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' LOCATION
+'/home/ubuntu/hive/batting';
+DROP TABLE IF EXISTS master;
+CREATE EXTERNAL TABLE IF NOT EXISTS master(id STRING, byear INT, bmonth INT, bday
+INT, bcountry STRING, bstate STRING, bcity STRING, dyear INT, dmonth INT, dday INT,
+dcountry STRING, dstate STRING, dcity STRING, fname STRING, lname STRING, name
+STRING, weight INT, height INT, bats STRING, throws STRING, debut STRING, finalgame
+STRING, retro STRING, bbref STRING) ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+LOCATION '/home/ubuntu/hive/master';
+DROP TABLE IF EXISTS fielding;
+CREATE EXTERNAL TABLE IF NOT EXISTS fielding(id STRING, year INT, team STRING, lgID
+STRING, pos STRING, g FLOAT, gs INT, innouts INT, po INT, a INT,
+errors FLOAT, dp INT, pb INT, wp INT, sb INT, cs INT, zr INT) ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+LOCATION '/home/ubuntu/hive/fielding';
+
+
+-- #1.	Output the birth city of the player who had the most at bats (AB) in his career.
+
+!echo 'Problem 1 result:';
+
+SELECT bcity FROM
+(SELECT bcity, rank() over (order by cast(sumatbats as int) desc) as r FROM
+(SELECT m.id, m.bcity, batter_filtrd.sumatbats FROM
+master m JOIN (SELECT b.id, SUM(ab) as sumatbats FROM
+batting b GROUP BY b.id) batter_filtrd WHERE m.id=batter_filtrd.id) t1) t2
+WHERE t2.r = 1;
+
+-- #2.   Output the top three birthdates that had the most players born. I am only looking for day and month combinations.
+-- For instance, how many were born on February 3rd, how many were born on March 8th, how many were born on July 20th…
+-- print out the top three dates.
+
+!echo 'Problem 2 results:';
+
+DROP TABLE IF EXISTS birthdays;
+CREATE TABLE birthdays ( month INT, day INT, bdaycount INT);
+INSERT INTO TABLE birthdays SELECT bday, bmonth, count(*) FROM
+master m WHERE bday IS NOT NULL AND bmonth IS NOT NULL GROUP BY bmonth, bday;
+SELECT day, month FROM
+(SELECT day, month, RANK() OVER (ORDER BY bdaycount DESC) as r FROM birthdays) t1 WHERE t1.r <=3 ;
+
+-- #3.   Output the second most common weight. 
+
+!echo 'Problem 3 result:';
+
+DROP TABLE IF EXISTS weights;
+CREATE TABLE weights ( weight INT, weightcount INT);
+INSERT INTO TABLE weights SELECT weight, count(*) FROM
+master m WHERE weight IS NOT NULL GROUP BY weight;
+SELECT weight FROM
+(SELECT weight, RANK() OVER (ORDER BY weightcount DESC) as r FROM weights) t1 WHERE t1.r =2 ;
+
+-- #4.   Output the team that had the most errors in 2001. 
+
+!echo 'Problem 4 result:';
+
+DROP TABLE IF EXISTS errortbl;
+CREATE TABLE errortbl ( team STRING, sumerrors INT);
+INSERT INTO TABLE errortbl SELECT team, SUM(errors) FROM
+fielding f WHERE errors IS NOT NULL AND team IS NOT NULL AND year == 2001 GROUP BY team;
+SELECT team FROM
+(SELECT team, RANK() OVER (ORDER BY sumerrors DESC) as r FROM errortbl) t1 WHERE t1.r =1 ;
+
+-- #5.   Output the name of the player who had the most errors in all seasons combined. 
+
+!echo 'Problem 5 result:';
+
+DROP TABLE IF EXISTS playererrors;
+CREATE TABLE playererrors ( id STRING, fname STRING, lname STRING, sumerrors INT);
+INSERT INTO TABLE playererrors SELECT id, fname, lname, sumerrors FROM
+(SELECT m.id, m.fname, m.lname, fielding_filtrd.sumerrors FROM
+master m JOIN (SELECT f.id, SUM(f.errors) as sumerrors FROM fielding f WHERE errors IS NOT NULL GROUP BY f.id) fielding_filtrd WHERE m.id == fielding_filtrd.id) t1;
+SELECT fname, lname FROM
+(SELECT fname, lname, RANK() OVER (ORDER BY sumerrors DESC) as r FROM playererrors) t2 WHERE t2.r =1;
+
+-- #6 A player who hits well and doesn’t commit a lot of errors is obviously a player you want on your team.
+-- Who were the top 3 players from 2005 through 2009 (including 2005 and 2009) who maximized the following criterion:
+-- (number of hits (H) / number of at bats (AB)) – (number of errors (E) / number of games (G))
+-- The above equation might be skewed by a player who only had 3 at bats but got two hits.
+-- To account for that, only consider players who had at least 40 at bats and played in at least 20 games over that entire 5 year span.
+-- You should note that both files contain a number of games column. The 20 game minimum is from the Fielding file.
+-- Be aware that some players played for multiple teams during that 5 year span. Also be aware that a player could have played multiple positions during that span (see for instance, buchabr01 in 2004 who played LF, OF and RF in the same season).
+
+!echo 'Problem 6 results:';
+
+DROP TABLE IF EXISTS worstplayer1;
+CREATE TABLE worstplayer1 ( id STRING, sumatbats INT, sumhits INT);
+INSERT INTO TABLE worstplayer1 SELECT id, sumatbats, sumhits FROM
+(SELECT b.id, SUM(b.ab) as sumatbats, SUM(b.hits) as sumhits FROM
+batting b WHERE b.year >= 2005 AND b.year <= 2009 AND ab >= 0 AND hits >=0 GROUP BY b.id) t1;
+
+DROP TABLE IF EXISTS worstplayer2;
+CREATE TABLE worstplayer2 ( id STRING, sumerrors INT, sumgames INT);
+INSERT INTO TABLE worstplayer2 SELECT id, sumerrors, sumgames FROM
+(SELECT id, SUM(errors) as sumerrors, SUM(g) as sumgames FROM 
+fielding f WHERE f.year >= 2005 AND f.year <= 2009 AND errors >= 0 and g >=0 GROUP BY f.id) t2;
+
+DROP TABLE IF EXISTS worstplayer;
+CREATE TABLE worstplayer ( id STRING, fname STRING, lname STRING, score FLOAT, numgames INT);
+INSERT INTO TABLE worstplayer SELECT t4.id, fname, lname, score, sumgames FROM
+(SELECT t1.id, ((sumhits/sumatbats)-(sumerrors/sumgames)) as score, sumgames  FROM worstplayer1 t1 JOIN worstplayer2 t2 WHERE t1.id == t2.id AND sumgames >=20 AND sumatbats >=40) t3 JOIN (SELECT id, fname, lname FROM master m) t4 WHERE t3.id == t4.id;
+
+SELECT fname, lname FROM
+(SELECT fname, lname, RANK() OVER (ORDER BY score DESC) as r FROM worstplayer GROUP BY fname, lname, score) worst WHERE worst.r <= 3 ;
+
+-- #7 Sum up the number of doubles and triples for each city/state combination.
+-- Output the top 5 city/state combinations that produced the players who had the most doubles and triples.
+
+!echo 'Problem 7 results:';
+
+DROP TABLE IF EXISTS playerdata;
+CREATE TABLE playerdata ( id STRING, sumdoubles INT, sumtriples INT, score INT);
+INSERT INTO TABLE playerdata SELECT id, sumdoubles, sumtriples, score FROM
+(SELECT b.id, SUM(b.doubles) as sumdoubles, SUM(b.triples) as sumtriples, (SUM(b.doubles) + SUM(b.triples)) as score FROM batting b WHERE b.year >0 GROUP BY id) t1;
+
+DROP TABLE IF EXISTS citydata;
+CREATE TABLE citydata ( bcity STRING, bstate STRING, score INT);
+INSERT INTO TABLE citydata SELECT bcity, bstate, SUM(score) FROM
+(SELECT id, bcity, bstate FROM master m) t2 JOIN playerdata WHERE t2.id == playerdata.id GROUP BY bstate,bcity;
+
+SELECT bstate, bcity FROM
+(SELECT bstate, bcity, RANK() OVER (ORDER BY score DESC) as r FROM citydata) topcities WHERE topcities.r <= 5 ;
+
+-- #8 Output the birthMonth/state combination that produced the worst players.
+-- The worst players are defined by the lowest of:  (number of hits (H) / number of at bats (AB))
+-- To ensure 1 player does not skew the data, make sure that at least 5 people came from the same state and were born in
+-- the same month. For this problem, the year does not matter. A player born in December, 1970 in Michigan and a player born
+-- in December, 1982 in Michigan are in the same group because they were both born in December and are from Michigan.
+
+!echo 'Problem 8 result:';
+
+DROP TABLE IF EXISTS monthstate;
+CREATE TABLE monthstate ( month INT, state STRING, score FLOAT, idcount INT);
+INSERT INTO TABLE monthstate SELECT bmonth, bstate, SUM(sumhits)/SUM(sumatbats) as score, COUNT(t1.id) as idcount FROM
+(SELECT id, bmonth, bstate FROM master m WHERE bmonth IS NOT NULL AND bstate IS NOT NULL) t1 JOIN (SELECT id, SUM(hits) as sumhits, SUM(ab) as sumatbats FROM batting b WHERE b.year>0 GROUP BY id) t2 WHERE t2.id == t1.id GROUP BY bmonth,bstate;
+
+SELECT month, state FROM
+(SELECT month, state, RANK() OVER (ORDER BY score ASC) as r FROM monthstate WHERE idcount >= 5) worstplayers WHERE worstplayers.r <= 1;
+

@@ -1,0 +1,24 @@
+'Problem 1 result:'
+Cincinnati
+'Problem 2 results:'
+11	18
+8	15
+8	4
+'Problem 3 result:'
+185
+'Problem 4 result:'
+SDN
+'Problem 5 result:'
+Herman	Long
+'Problem 6 results:'
+Alex	Escobar
+Ichiro	Suzuki
+Norris	Hopper
+'Problem 7 results:'
+CA	Los Angeles
+IL	Chicago
+PA	Philadelphia
+MO	St. Louis
+CA	San Francisco
+'Problem 8 result:'
+10	San Cristobal
